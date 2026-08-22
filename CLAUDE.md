@@ -28,7 +28,7 @@ Each module maps to a real data source. Wire each one up with an MCP connector o
 |---|---|---|
 | CASE FILES | Task manager (Todoist / Linear / local `tasks.md`) | live — client-only, backed by browser localStorage in `index.html`. Swap in a real task manager connector when ready. |
 | COMM INTERCEPTS | Email (Gmail MCP connector) | live — Gmail is connected and authorized. Claude reads/searches/summarizes on request; drafts and sends still require explicit confirmation in the same turn (see Rules). Slack not yet connected. |
-| PATROL LOG | Calendar (Google Calendar / iCal) | NO FEED — Google Calendar connector is available but not yet authorized for this org. Connect it at claude.ai (Settings → Connectors → add "Google Calendar" → authorize with the Google account → enable it for this chat), then Claude can read events and draft prep notes. |
+| PATROL LOG | Calendar (Microsoft 365 / Outlook Calendar) | NO FEED — Microsoft 365 connector is available but not yet authorized for this org. Connect it at claude.ai (Settings → Connectors → add "Microsoft 365" → authorize with the Microsoft/Outlook account → enable it for this chat), then Claude can read events via `outlook_calendar_search` / `find_meeting_availability` and draft prep notes. Gmail stays the feed for COMM INTERCEPTS — this doesn't replace it. |
 | SYSTEM DIAGNOSTICS | Machine health — disk, backups, sync status | partial — `index.html` reports what the browser can see about the terminal itself (link status, connection type, storage quota, CPU threads, memory). OS-level disk/backups/sync still need a connector. |
 | CITY WATCH | Weather + local news/alerts for San Pedro Sula | partial — weather is live via Open-Meteo. Local news/alerts are NO FEED — connect. |
 
@@ -53,7 +53,7 @@ The dashboard (`index.html`) runs this same briefing shape into its ACTIVITY LOG
 These aren't live yet. When the user is ready to connect one, help them set it up rather than assuming it's already there.
 
 - **Email** — connect a Gmail/Outlook MCP connector for COMM INTERCEPTS. Summarize only; never send without explicit confirmation in the same turn.
-- **Calendar** — connect Google Calendar / iCal for PATROL LOG, including prep notes per meeting.
+- **Calendar** — connect Microsoft 365 (Outlook Calendar) for PATROL LOG, including prep notes per meeting. The connector also exposes SharePoint, OneDrive, and Teams search (`sharepoint_search`, `chat_message_search`, etc.) if those ever earn a spot on the dashboard — add a module-table row first if so.
 - **Tasks** — CASE FILES currently persists to the browser's localStorage in `index.html`. Connect Todoist/Linear, or fall back to a local `tasks.md` the Batcomputer reads and writes directly, when a real connector is ready.
 - **System diagnostics** — connect a real backup/sync monitor and OS-level disk stats; the dashboard currently only reports what a browser can see about itself.
 - **Local news/alerts** — connect a news source for San Pedro Sula to round out CITY WATCH (weather is already live via Open-Meteo, no API key needed: `https://api.open-meteo.com/v1/forecast?latitude=15.5042&longitude=-88.0250&current=temperature_2m,relative_humidity_2m,wind_speed_10m,surface_pressure,weather_code&timezone=auto`).
