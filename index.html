@@ -54,6 +54,7 @@ const WEATHER_LAT = 15.5042;
 const WEATHER_LON = -88.0250;
 const ATTENDANCE_URL = 'https://victoryacaman.github.io/vyacaman/attendance/';
 const ATTENDANCE_MANAGER_URL = 'https://victoryacaman.github.io/vyacaman/attendance/gerente/';
+const ATTENDANCE_FEED_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/attendance-feed';
 
 const MODULES = [
   ['OPS', 'OVERVIEW'],
@@ -151,6 +152,31 @@ function useWeather(lat, lon, intervalMs = 10 * 60 * 1000) {
     return () => { cancelled = true; clearInterval(id); };
   }, [lat, lon, intervalMs]);
   return weather;
+}
+
+const ATTENDANCE_ACTION_LABELS = { clock_in: 'clocked in', clock_out: 'clocked out', extra_in: 'started overtime', extra_out: 'ended overtime' };
+function useAttendanceFeed(push, intervalMs = 20000) {
+  const sinceRef = useRef(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const url = sinceRef.current ? `${ATTENDANCE_FEED_URL}?since=${encodeURIComponent(sinceRef.current)}` : ATTENDANCE_FEED_URL;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (cancelled || !data.ok) return;
+        sinceRef.current = data.since;
+        for (const ev of data.events) {
+          const t = new Date(ev.time).toLocaleTimeString('es-HN', { timeZone: 'America/Tegucigalpa', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const label = ATTENDANCE_ACTION_LABELS[ev.action] || ev.action;
+          push(`ATTENDANCE · ${ev.name} ${label} — ${t}`);
+        }
+      } catch (e) {}
+    }
+    poll();
+    const id = setInterval(poll, intervalMs);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [push, intervalMs]);
 }
 
 function useDiagnostics(intervalMs = 5000) {
@@ -530,6 +556,7 @@ function App() {
   const { logs, push, clear } = useActivity();
   const weather = useWeather(WEATHER_LAT, WEATHER_LON);
   const diag = useDiagnostics();
+  useAttendanceFeed(push);
 
   const [q, setQ] = useState('');
   const [module, setModule] = useState('OPS');
