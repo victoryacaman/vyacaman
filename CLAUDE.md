@@ -27,10 +27,12 @@ Each module maps to a real data source. Wire each one up with an MCP connector o
 | Module | Feeds from | Status |
 |---|---|---|
 | CASE FILES | Task manager (Todoist / Linear / local `tasks.md`) | live — client-only, backed by browser localStorage in `index.html`. Swap in a real task manager connector when ready. |
-| COMM INTERCEPTS | Email / Slack | NO FEED — connect |
-| PATROL LOG | Calendar (Google Calendar / iCal) | NO FEED — connect |
+| COMM INTERCEPTS | Email (Gmail MCP connector) | live — Gmail is connected and authorized. Claude reads/searches/summarizes on request; drafts and sends still require explicit confirmation in the same turn (see Rules). Slack not yet connected. |
+| PATROL LOG | Calendar (Google Calendar / iCal) | NO FEED — Google Calendar connector is available but not yet authorized for this org. Connect it at claude.ai (Settings → Connectors → add "Google Calendar" → authorize with the Google account → enable it for this chat), then Claude can read events and draft prep notes. |
 | SYSTEM DIAGNOSTICS | Machine health — disk, backups, sync status | partial — `index.html` reports what the browser can see about the terminal itself (link status, connection type, storage quota, CPU threads, memory). OS-level disk/backups/sync still need a connector. |
 | CITY WATCH | Weather + local news/alerts for San Pedro Sula | partial — weather is live via Open-Meteo. Local news/alerts are NO FEED — connect. |
+
+Note: COMM INTERCEPTS and PATROL LOG are wired at the Claude/MCP layer — ask the Batcomputer directly (in this chat) for a live triage or briefing and it will pull real data. The dashboard in `index.html` is a static, client-only page with no backend, so its own COMM INTERCEPTS/PATROL LOG panels still show "NO FEED" regardless of what's connected here — making them live in the dashboard itself would need a small backend/proxy to hold the OAuth tokens, which is a separate build.
 
 ## Startup briefing
 When the user starts a session (or asks for a "status report" / "briefing"), respond in this shape:
