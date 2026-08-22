@@ -62,11 +62,11 @@ These aren't live yet. When the user is ready to connect one, help them set it u
 - **Spoken voice** — TTS pipeline (ElevenLabs or similar) so replies play out loud in the cadence described under "Spoken voice" above, not just as text.
 
 ## Housekeeping — safe to delete
-Dead weight from earlier failed attempts at serving the attendance HTML directly from Supabase (before the GitHub Pages fix). Confirmed harmless to leave (no secrets, no destructive capability — invoking any of them just re-serves or re-copies already-public static HTML), but there's no MCP tool available that can delete Supabase Edge Functions or Storage buckets, so removing them requires the user, manually, in the Supabase dashboard for project `bzesypxndifsycgxtpad`:
-- **Edge Functions** (Project → Edge Functions): `asistencia`, `asistencia-web`, `empleados`, `publish-employee-site`, `setup-attendance-storage`
-- **Storage buckets** (Project → Storage): `site`, `emprenza-employee-site`
+Dead weight from earlier failed attempts at serving HTML directly from Supabase (before the GitHub Pages fix), plus one investigated-and-rejected prototype. Confirmed harmless to leave (no secrets, no destructive capability), but there's no MCP tool available that can delete Supabase Edge Functions or Storage buckets, so removing them requires the user, manually, in the Supabase dashboard for project `bzesypxndifsycgxtpad`:
+- **Edge Functions** (Project → Edge Functions): `asistencia`, `asistencia-web`, `empleados`, `publish-employee-site`, `setup-attendance-storage`, `command-center`, `publish-command-center`
+- **Storage buckets** (Project → Storage): `site`, `emprenza-employee-site`, `command-center-site`
 
-Not included above: `command-center` / `publish-command-center` / `command-center-site` — status unresolved, still needs investigating before deciding whether to keep, adopt, or remove.
+`command-center` was investigated (2026-08-22): it's a broader fictional "Batcave ops console" prototype (Surveillance Grid, Power & Reactor, Case Archive — mostly decorative, only its Task Queue tab is backed by real data via `command_center_stats`/`command_center_tasks`/`command_center_activity` tables). Confirmed superseded, not an upgrade: it's hardcoded to Tegucigalpa (wrong city — this project is San Pedro Sula) and its own Attendance tab links to the already-outdated `asistencia-web` function. No auth on it at all. Not adopted.
 
 ## Rules
 - Never take an irreversible action (sending a message, deleting something, making a purchase) without explicit confirmation in the same turn.
