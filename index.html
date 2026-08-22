@@ -57,6 +57,8 @@ const ATTENDANCE_MANAGER_URL = 'https://victoryacaman.github.io/vyacaman/attenda
 const ATTENDANCE_FEED_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/attendance-feed';
 const GMAIL_SUMMARY_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/gmail-summary';
 const PATROL_SUMMARY_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/patrol-summary';
+const ORACLE_CHAT_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/oracle-chat';
+const ORACLE_SPEAK_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/oracle-speak';
 
 const MODULES = [
   ['OPS', 'OVERVIEW'],
@@ -65,7 +67,8 @@ const MODULES = [
   ['PTL', 'PATROL LOG'],
   ['SYS', 'SYSTEM DIAGNOSTICS'],
   ['CTY', 'CITY WATCH'],
-  ['ATD', 'ATTENDANCE PANEL']
+  ['ATD', 'ATTENDANCE PANEL'],
+  ['ORC', 'ORACLE']
 ];
 const QUICK_CMDS = ['/BRIEF', '/STATUS', '/LOCKDOWN', '/CLEAR'];
 const TASKS_KEY = 'batcomputer.case_files.v1';
@@ -607,6 +610,102 @@ function AttendanceConsole({ url, managerUrl }) {
     </div>`;
 }
 
+const ORACLE_STATUS_LABEL = { idle: 'TALK', listening: 'LISTENING…', thinking: 'THINKING…', speaking: 'SPEAKING…' };
+function OracleConsole({ speak }) {
+  const [status, setStatus] = useState('idle');
+  const [turns, setTurns] = useState([]);
+  const [errorMsg, setErrorMsg] = useState('');
+  const recognitionRef = useRef(null);
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
+
+  const Recognition = typeof window !== 'undefined' ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+
+  const playReply = useCallback(async (text) => {
+    setStatus('speaking');
+    try {
+      const res = await fetch(ORACLE_SPEAK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+      const ctype = res.headers.get('content-type') || '';
+      if (res.ok && ctype.startsWith('audio/')) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        await new Promise((resolve) => {
+          const audio = new Audio(url);
+          audio.onended = resolve;
+          audio.onerror = resolve;
+          audio.play().catch(resolve);
+        });
+        URL.revokeObjectURL(url);
+      } else {
+        speak(text);
+      }
+    } catch (e) {
+      speak(text);
+    }
+    setStatus('idle');
+  }, [speak]);
+
+  const sendMessage = useCallback(async (text) => {
+    const history = turnsRef.current.map(t => ({ role: t.role === 'user' ? 'user' : 'assistant', content: t.text }));
+    setTurns(t => [...t, { role: 'user', text }]);
+    setStatus('thinking');
+    setErrorMsg('');
+    try {
+      const res = await fetch(ORACLE_CHAT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, history }) });
+      const data = await res.json();
+      if (!data.ok) {
+        setErrorMsg(data.error === 'not_configured' ? 'Oracle needs an Anthropic API key configured before it can think.' : `Oracle hit an error: ${data.error}`);
+        setStatus('idle');
+        return;
+      }
+      setTurns(t => [...t, { role: 'oracle', text: data.reply }]);
+      await playReply(data.reply);
+    } catch (e) {
+      setErrorMsg('Could not reach Oracle.');
+      setStatus('idle');
+    }
+  }, [playReply]);
+
+  const startListening = useCallback(() => {
+    if (!Recognition) { setErrorMsg('This browser does not support voice input — try Chrome.'); return; }
+    setErrorMsg('');
+    const rec = new Recognition();
+    rec.lang = 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e) => { sendMessage(e.results[0][0].transcript); };
+    rec.onerror = () => { setStatus('idle'); };
+    rec.onend = () => { setStatus(s => s === 'listening' ? 'idle' : s); };
+    recognitionRef.current = rec;
+    setStatus('listening');
+    rec.start();
+  }, [sendMessage, Recognition]);
+
+  const stopListening = useCallback(() => { recognitionRef.current && recognitionRef.current.stop(); }, []);
+  const busy = status === 'thinking' || status === 'speaking';
+
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 20%, rgba(20,66,84,.35), rgba(2,9,14,.95))', display:'flex', flexDirection:'column' }}>
+      <div style=${{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 16px', borderBottom:'1px solid rgba(95,216,245,.24)' }}>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5' }}>ORACLE · VOICE COMPANION</span>
+        <span style=${{ display:'flex', alignItems:'center', gap:6, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.2em', color:'#9ff2ff' }}>
+          <span style=${{ width:6, height:6, borderRadius:'50%', background: status === 'idle' ? '#3f7488' : '#5fd8f5', boxShadow: status === 'idle' ? 'none' : '0 0 8px #5fd8f5', animation: status === 'idle' ? 'none' : 'blink 1.2s steps(1,end) infinite' }}></span>
+          ${ORACLE_STATUS_LABEL[status]}
+        </span>
+      </div>
+      <div className="hud-scroll" style=${{ flex:1, minHeight:0, overflow:'auto', padding:16, display:'flex', flexDirection:'column', gap:10 }}>
+        ${turns.length === 0 && !errorMsg && html`<div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10, letterSpacing:'.1em', color:'#3f7488' }}>Press TALK and ask Oracle anything, sir.</div>`}
+        ${turns.map((t, i) => html`
+          <div key=${i} style=${{ alignSelf: t.role === 'user' ? 'flex-end' : 'flex-start', maxWidth:'80%', border:'1px solid rgba(95,216,245,.18)', background: t.role === 'user' ? 'rgba(95,216,245,.12)' : 'rgba(3,12,18,.7)', padding:'8px 12px', fontSize:13, lineHeight:1.5, color:'#dff7ff' }}>${t.text}</div>`)}
+        ${errorMsg && html`<div style=${{ border:'1px solid rgba(255,207,95,.5)', background:'rgba(255,207,95,.08)', color:'#ffcf5f', padding:'8px 12px', fontSize:12, fontFamily:"'IBM Plex Mono',monospace" }}>${errorMsg}</div>`}
+      </div>
+      <div style=${{ padding:14, borderTop:'1px solid rgba(95,216,245,.24)', display:'flex', justifyContent:'center' }}>
+        <button onClick=${status === 'listening' ? stopListening : startListening} disabled=${busy} className="hud-lock-hover"
+          style=${{ cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? .5 : 1, fontFamily:"'IBM Plex Mono',monospace", fontSize:11, letterSpacing:'.2em', color:'#01040a', background: status === 'listening' ? '#ff8f5f' : '#5fd8f5', border:'1px solid #d6fbff', padding:'10px 32px', boxShadow: status === 'listening' ? '0 0 18px rgba(255,143,95,.5)' : '0 0 18px rgba(95,216,245,.5)' }}>${ORACLE_STATUS_LABEL[status]}</button>
+      </div>
+    </div>`;
+}
+
 function WeatherPanel({ city, weather }) {
   const temp = weather ? weather.temp : '—';
   const desc = weather ? weather.desc : 'AWAITING UPLINK…';
@@ -766,6 +865,7 @@ function App() {
             ${module === 'SYS' && html`<${DiagnosticsConsole} diag=${diag} />`}
             ${module === 'CTY' && html`<${CityWatchConsole} city=${WEATHER_CITY} weather=${weather} />`}
             ${module === 'ATD' && html`<${AttendanceConsole} url=${ATTENDANCE_URL} managerUrl=${ATTENDANCE_MANAGER_URL} />`}
+            ${module === 'ORC' && html`<${OracleConsole} speak=${speak} />`}
           </div>
 
           <div style=${{ display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
