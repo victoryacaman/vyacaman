@@ -471,16 +471,22 @@ function CityWatchConsole({ city, weather }) {
 }
 
 function AttendanceConsole({ url, managerUrl }) {
+  const [view, setView] = useState('kiosk');
+  const activeUrl = view === 'kiosk' ? url : managerUrl;
+  const tabStyle = (on) => ({ cursor:'pointer', fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.2em', padding:'6px 10px', border:'1px solid rgba(95,216,245,.4)', background: on ? 'rgba(95,216,245,.22)' : 'transparent', color: on ? '#eafdff' : '#9ff2ff' });
   return html`
     <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'#01040a', display:'flex', flexDirection:'column' }}>
-      <div style=${{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px', borderBottom:'1px solid rgba(95,216,245,.24)', background:'rgba(2,9,15,.72)' }}>
-        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5' }}>ATTENDANCE PANEL · LIVE FEED</span>
-        <div style=${{ display:'flex', gap:8 }}>
-          <a href=${managerUrl} target="_blank" rel="noreferrer" style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.22em', color:'#9ff2ff', border:'1px solid rgba(95,216,245,.4)', padding:'4px 9px' }}>PANEL DEL GERENTE ↗</a>
-          <a href=${url} target="_blank" rel="noreferrer" style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.22em', color:'#9ff2ff', border:'1px solid rgba(95,216,245,.4)', padding:'4px 9px' }}>OPEN FULL SCREEN ↗</a>
+      <div style=${{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 14px', borderBottom:'1px solid rgba(95,216,245,.24)', background:'rgba(2,9,15,.72)', flexWrap:'wrap', gap:8 }}>
+        <div style=${{ display:'flex', alignItems:'center', gap:10 }}>
+          <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5' }}>ATTENDANCE PANEL</span>
+          <div style=${{ display:'flex', gap:6 }}>
+            <button onClick=${() => setView('kiosk')} style=${tabStyle(view === 'kiosk')}>EMPLOYEE KIOSK</button>
+            <button onClick=${() => setView('gerente')} style=${tabStyle(view === 'gerente')}>PANEL DEL GERENTE</button>
+          </div>
         </div>
+        <a href=${activeUrl} target="_blank" rel="noreferrer" style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.22em', color:'#9ff2ff', border:'1px solid rgba(95,216,245,.4)', padding:'4px 9px' }}>OPEN FULL SCREEN ↗</a>
       </div>
-      <iframe title="Attendance Panel" src=${url} style=${{ flex:1, border:0, width:'100%', background:'#f6f7fb' }}></iframe>
+      <iframe key=${view} title="Attendance Panel" src=${activeUrl} style=${{ flex:1, border:0, width:'100%', background:'#f6f7fb' }}></iframe>
     </div>`;
 }
 
