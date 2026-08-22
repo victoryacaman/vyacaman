@@ -56,6 +56,7 @@ const ATTENDANCE_URL = 'https://victoryacaman.github.io/vyacaman/attendance/';
 const ATTENDANCE_MANAGER_URL = 'https://victoryacaman.github.io/vyacaman/attendance/gerente/';
 const ATTENDANCE_FEED_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/attendance-feed';
 const GMAIL_SUMMARY_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/gmail-summary';
+const PATROL_SUMMARY_URL = 'https://bzesypxndifsycgxtpad.supabase.co/functions/v1/patrol-summary';
 
 const MODULES = [
   ['OPS', 'OVERVIEW'],
@@ -200,6 +201,26 @@ function useCommFeed(intervalMs = 2 * 60 * 1000) {
     return () => { cancelled = true; clearInterval(id); };
   }, [intervalMs]);
   return comm;
+}
+
+function usePatrolFeed(intervalMs = 5 * 60 * 1000) {
+  const [patrol, setPatrol] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const res = await fetch(PATROL_SUMMARY_URL);
+        const data = await res.json();
+        if (!cancelled) setPatrol(data);
+      } catch (e) {
+        if (!cancelled) setPatrol({ ok: false, error: 'unreachable' });
+      }
+    }
+    poll();
+    const id = setInterval(poll, intervalMs);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [intervalMs]);
+  return patrol;
 }
 
 function useVoice() {
@@ -492,6 +513,31 @@ function CommInterceptsConsole({ comm }) {
     </div>`;
 }
 
+function PatrolLogConsole({ patrol }) {
+  if (!patrol || !patrol.ok) {
+    const note = patrol && (patrol.error === 'not_authorized' || patrol.error === 'calendar_scope_missing')
+      ? 'Google Calendar connected but not yet authorized for this scope — complete the OAuth consent step to activate this feed.'
+      : 'Connect Google Calendar or iCal to activate this feed.';
+    return html`<${NoFeedConsole} label="PATROL LOG" note=${note} />`;
+  }
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 30%, rgba(20,66,84,.35), rgba(2,9,14,.95))', padding:20, display:'flex', flexDirection:'column' }}>
+      <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5', marginBottom:14 }}>PATROL LOG · CALENDAR</div>
+      <div style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'14px 16px', marginBottom:16 }}>
+        <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488' }}>TODAY</div>
+        <div style=${{ fontSize:36, fontWeight:700, color:'#dff7ff' }}>${patrol.todayCount}</div>
+      </div>
+      ${patrol.next ? html`
+        <div style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'12px 14px' }}>
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488', marginBottom:6 }}>NEXT</div>
+          <div style=${{ fontSize:13, color:'#dff7ff', marginBottom:4, wordBreak:'break-word' }}>${patrol.next.summary}</div>
+          ${patrol.next.location && html`<div style=${{ fontSize:11, color:'#7fb8cc', wordBreak:'break-word' }}>${patrol.next.location}</div>`}
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, color:'#3f7488', marginTop:8 }}>${patrol.next.when}</div>
+        </div>` : html`
+        <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10, color:'#3f7488' }}>NO UPCOMING EVENTS</div>`}
+    </div>`;
+}
+
 function DiagnosticsConsole({ diag }) {
   const tiles = [
     { label:'LINK STATUS', value: diag ? (diag.online ? 'ONLINE' : 'OFFLINE') : '—' },
@@ -636,6 +682,7 @@ function App() {
   const { on: voiceOn, toggle: toggleVoice, speak } = useVoice();
   useAttendanceFeed(push, speak);
   const comm = useCommFeed();
+  const patrol = usePatrolFeed();
 
   const [q, setQ] = useState('');
   const [module, setModule] = useState('OPS');
@@ -648,17 +695,21 @@ function App() {
   const commLine = comm && comm.ok
     ? `${comm.unread} unread${comm.latest ? ' · latest: ' + comm.latest.from.replace(/<[^>]*>/, '').trim() : ''}`
     : 'NO FEED — connect email';
+  const patrolLine = patrol && patrol.ok
+    ? (patrol.next ? `next: "${patrol.next.summary}" — ${patrol.next.when}` : `${patrol.todayCount} today · no upcoming events`)
+    : 'NO FEED — connect calendar';
 
   const runBriefing = useCallback(() => {
     push('STATUS · all systems nominal');
     const openTasks = tasks.filter(t => !t.done);
     push(`CASE FILES · ${openCount} open${openTasks[0] ? ' · top: "' + openTasks[0].label + '"' : ''}`);
-    push('PATROL LOG · NO FEED — connect calendar');
+    push(`PATROL LOG · ${patrolLine}`);
     push(`COMM INTERCEPTS · ${commLine}`);
     push(`CITY WATCH · ${weather ? weather.temp + '°C ' + weather.desc : 'awaiting uplink…'}`);
     const commSpoken = comm && comm.ok ? ` ${comm.unread} unread email${comm.unread === 1 ? '' : 's'}.` : '';
-    speak(`All systems nominal. ${openCount} open case${openCount === 1 ? '' : 's'}.${commSpoken} ${weather ? weather.temp + ' degrees, ' + weather.desc.toLowerCase() + '.' : 'Weather awaiting uplink.'}`);
-  }, [push, speak, tasks, openCount, weather, comm, commLine]);
+    const patrolSpoken = patrol && patrol.ok && patrol.next ? ` Next on the calendar: ${patrol.next.summary}, ${patrol.next.when.toLowerCase()}.` : '';
+    speak(`All systems nominal. ${openCount} open case${openCount === 1 ? '' : 's'}.${patrolSpoken}${commSpoken} ${weather ? weather.temp + ' degrees, ' + weather.desc.toLowerCase() + '.' : 'Weather awaiting uplink.'}`);
+  }, [push, speak, tasks, openCount, weather, comm, commLine, patrol, patrolLine]);
 
   const briefedRef = useRef(false);
   useEffect(() => {
@@ -674,15 +725,15 @@ function App() {
     if (!c) return;
     if (c === '/help') push('HELP · /brief /status /lockdown /clear');
     else if (c === '/brief') runBriefing();
-    else if (c === '/status') push(`STATUS · ${openCount} open cases · comms ${commLine} · patrol NO FEED · ${weather ? weather.temp + '°C ' + weather.desc : 'weather awaiting uplink'}`);
+    else if (c === '/status') push(`STATUS · ${openCount} open cases · comms ${commLine} · patrol ${patrolLine} · ${weather ? weather.temp + '°C ' + weather.desc : 'weather awaiting uplink'}`);
     else if (c === '/lockdown') toggleLock();
     else if (c === '/clear') clear();
     else push(`UNRECOGNIZED COMMAND · "${raw.trim()}" — try /help`);
-  }, [push, clear, toggleLock, runBriefing, openCount, weather, commLine]);
+  }, [push, clear, toggleLock, runBriefing, openCount, weather, commLine, patrolLine]);
 
   const selectModule = useCallback((code, label) => { setModule(code); push('MODULE · ' + label + ' loaded'); }, [push]);
 
-  const ticker = `${openCount} OPEN CASES · COMM INTERCEPTS ${commLine.toUpperCase()} · PATROL LOG NO FEED · UPLINK ${locked ? 'SEALED' : 'NOMINAL'} · ${WEATHER_CITY} ${weather ? weather.temp + '°C' : '—'}   `;
+  const ticker = `${openCount} OPEN CASES · COMM INTERCEPTS ${commLine.toUpperCase()} · PATROL LOG ${patrolLine.toUpperCase()} · UPLINK ${locked ? 'SEALED' : 'NOMINAL'} · ${WEATHER_CITY} ${weather ? weather.temp + '°C' : '—'}   `;
 
   return html`
     <div style=${{ minHeight:'100vh', padding:28, boxSizing:'border-box', background:'radial-gradient(120% 80% at 50% 0%, #072230 0%, #030c14 55%, #01040a 100%)', overflow:'auto' }}>
@@ -711,7 +762,7 @@ function App() {
             ${module === 'OPS' && html`<${OverviewConsole} openCount=${openCount} doneCount=${doneCount} total=${total} />`}
             ${module === 'CSF' && html`<${CaseFilesConsole} tasks=${tasks} openCount=${openCount} doneCount=${doneCount} />`}
             ${module === 'CMS' && html`<${CommInterceptsConsole} comm=${comm} />`}
-            ${module === 'PTL' && html`<${NoFeedConsole} label="PATROL LOG" note="Connect Google Calendar or iCal to activate this feed." />`}
+            ${module === 'PTL' && html`<${PatrolLogConsole} patrol=${patrol} />`}
             ${module === 'SYS' && html`<${DiagnosticsConsole} diag=${diag} />`}
             ${module === 'CTY' && html`<${CityWatchConsole} city=${WEATHER_CITY} weather=${weather} />`}
             ${module === 'ATD' && html`<${AttendanceConsole} url=${ATTENDANCE_URL} managerUrl=${ATTENDANCE_MANAGER_URL} />`}
