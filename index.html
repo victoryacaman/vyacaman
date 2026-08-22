@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#01040a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<title>BATCOMPUTER</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body, #root { height: 100%; }
+  body { margin: 0; background: #01040a; color: #bfe9f8; font-family: "Chakra Petch", system-ui, sans-serif; }
+  a { color: #5fd8f5; text-decoration: none; }
+  a:hover { color: #d6fbff; }
+  button, input { font-family: inherit; }
+  button:disabled { cursor: not-allowed; }
+  @keyframes sweep { 0%{transform:translateY(-140%)} 100%{transform:translateY(1400%)} }
+  @keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:.08} }
+  @keyframes pulseRing { 0%{transform:scale(.75);opacity:.55} 70%{transform:scale(1.45);opacity:0} 100%{opacity:0} }
+  @keyframes spinSlow { from{transform:rotate(0)} to{transform:rotate(360deg)} }
+  @keyframes spinRev { from{transform:rotate(0)} to{transform:rotate(-360deg)} }
+  @keyframes marquee { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+  @keyframes dashFlow { from{stroke-dashoffset:0} to{stroke-dashoffset:-60} }
+  @keyframes glowBreath { 0%,100%{opacity:.28} 50%{opacity:.95} }
+  @keyframes flick { 0%,94%{opacity:1} 95%{opacity:.45} 96%{opacity:1} 97%{opacity:.7} 100%{opacity:1} }
+  @keyframes riseFade { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none} }
+  .hud-hover:hover { border-color: rgba(95,216,245,.75) !important; }
+  .hud-cmd-hover:hover:not(:disabled) { background: rgba(95,216,245,.26) !important; }
+  .hud-task-hover:hover { border-color: rgba(95,216,245,.6) !important; }
+  .hud-lock-hover:hover { background: #eafdff !important; }
+  .hud-scroll::-webkit-scrollbar { width: 6px; }
+  .hud-scroll::-webkit-scrollbar-track { background: transparent; }
+  .hud-scroll::-webkit-scrollbar-thumb { background: rgba(95,216,245,.3); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { createElement as h, useState, useEffect, useCallback, useMemo, useRef, StrictMode } from 'https://esm.sh/react@19';
+import { createRoot } from 'https://esm.sh/react-dom@19/client';
+import htm from 'https://esm.sh/htm@3';
+
+const html = htm.bind(h);
+
+/* ---------- identity & location (see CLAUDE.md) ---------- */
+const CALLSIGN = 'BATCOMPUTER';
+const SUBTITLE = 'SAN PEDRO SULA OPS · HOME TERMINAL';
+const SECTOR = 'SPS-01';
+const OPERATOR_ADDRESS = 'sir';
+const WEATHER_CITY = 'SAN PEDRO SULA';
+const WEATHER_LAT = 15.5042;
+const WEATHER_LON = -88.0250;
+
+const MODULES = [
+  ['OPS', 'OVERVIEW'],
+  ['CSF', 'CASE FILES'],
+  ['CMS', 'COMM INTERCEPTS'],
+  ['PTL', 'PATROL LOG'],
+  ['SYS', 'SYSTEM DIAGNOSTICS'],
+  ['CTY', 'CITY WATCH']
+];
+const QUICK_CMDS = ['/BRIEF', '/STATUS', '/LOCKDOWN', '/CLEAR'];
+const TASKS_KEY = 'batcomputer.case_files.v1';
+
+/* ---------- weather (Open-Meteo, no key needed) ---------- */
+const WMO = {
+  0:'CLEAR SKY',1:'MOSTLY CLEAR',2:'PARTLY CLOUDY',3:'OVERCAST',45:'FOG',48:'DEPOSITING FOG',
+  51:'LIGHT DRIZZLE',53:'DRIZZLE',55:'DENSE DRIZZLE',61:'LIGHT RAIN',63:'RAIN',65:'HEAVY RAIN',
+  71:'LIGHT SNOW',73:'SNOW',75:'HEAVY SNOW',80:'RAIN SHOWERS',81:'RAIN SHOWERS',82:'VIOLENT SHOWERS',
+  95:'THUNDERSTORM',96:'THUNDERSTORM · HAIL',99:'THUNDERSTORM · HAIL'
+};
+async function fetchWeather(lat, lon) {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,surface_pressure,weather_code&timezone=auto`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('weather fetch failed');
+  const data = await res.json();
+  const c = data.current;
+  return {
+    temp: Math.round(c.temperature_2m),
+    desc: WMO[c.weather_code] ?? 'CONDITIONS UNKNOWN',
+    humidity: Math.round(c.relative_humidity_2m) + '%',
+    wind: Math.round(c.wind_speed_10m) + ' KM/H',
+    pressure: Math.round(c.surface_pressure)
+  };
+}
+
+/* ---------- utils ---------- */
+function pad(n) { return String(n).padStart(2, '0'); }
+function greeting(now) {
+  const h = now.getHours();
+  if (h < 12) return 'good morning';
+  if (h < 18) return 'good afternoon';
+  return 'good evening';
+}
+function loadTasks() {
+  try { return JSON.parse(localStorage.getItem(TASKS_KEY)) || []; } catch (e) { return []; }
+}
+function saveTasks(tasks) {
+  try { localStorage.setItem(TASKS_KEY, JSON.stringify(tasks)); } catch (e) {}
+}
+
+/* ---------- hooks ---------- */
+function useClock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
+  return now;
+}
+
+function useTasks() {
+  const [tasks, setTasks] = useState(() => loadTasks());
+  useEffect(() => { saveTasks(tasks); }, [tasks]);
+  const addTask = useCallback((label) => {
+    if (!label.trim()) return;
+    setTasks(prev => [{ id: 'case-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), label: label.trim(), done: false, created_at: Date.now() }, ...prev]);
+  }, []);
+  const toggleTask = useCallback((id) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
+  }, []);
+  const removeTask = useCallback((id) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+  }, []);
+  const sorted = useMemo(() => [...tasks].sort((a, b) => (a.done === b.done ? b.created_at - a.created_at : a.done ? 1 : -1)), [tasks]);
+  const openCount = tasks.filter(t => !t.done).length;
+  const doneCount = tasks.length - openCount;
+  return { tasks: sorted, addTask, toggleTask, removeTask, openCount, doneCount, total: tasks.length };
+}
+
+function useActivity() {
+  const [entries, setEntries] = useState([]);
+  const push = useCallback((msg) => {
+    const now = new Date();
+    const t = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    setEntries(prev => [{ id: now.getTime() + '-' + Math.random().toString(36).slice(2, 7), t, msg }, ...prev].slice(0, 40));
+  }, []);
+  const clear = useCallback(() => setEntries([]), []);
+  return { logs: entries, push, clear };
+}
+
+function useWeather(lat, lon, intervalMs = 10 * 60 * 1000) {
+  const [weather, setWeather] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function load() { try { const w = await fetchWeather(lat, lon); if (!cancelled) setWeather(w); } catch (e) {} }
+    load();
+    const id = setInterval(load, intervalMs);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [lat, lon, intervalMs]);
+  return weather;
+}
+
+function useDiagnostics(intervalMs = 5000) {
+  const [diag, setDiag] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    async function sample() {
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      let storage = null;
+      try { if (navigator.storage && navigator.storage.estimate) storage = await navigator.storage.estimate(); } catch (e) {}
+      if (cancelled) return;
+      setDiag({
+        online: navigator.onLine,
+        effectiveType: conn ? conn.effectiveType : null,
+        downlink: conn && conn.downlink != null ? conn.downlink : null,
+        rtt: conn && conn.rtt != null ? conn.rtt : null,
+        cores: navigator.hardwareConcurrency || null,
+        memoryGb: navigator.deviceMemory || null,
+        storageUsedMb: storage ? Math.round((storage.usage || 0) / 1e6) : null,
+        storageQuotaMb: storage ? Math.round((storage.quota || 0) / 1e6) : null,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone
+      });
+    }
+    sample();
+    const id = setInterval(sample, intervalMs);
+    window.addEventListener('online', sample);
+    window.addEventListener('offline', sample);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('online', sample); window.removeEventListener('offline', sample); };
+  }, [intervalMs]);
+  return diag;
+}
+
+/* ---------- shared chrome ---------- */
+function Emblem({ size = 250 }) {
+  return html`
+    <div style=${{ position:'relative', width:size, height:size*0.4, flex:'0 0 auto', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style=${{
+        position:'absolute', inset:0,
+        background:'linear-gradient(180deg, #eafdff, #5fd8f5 55%, rgba(95,216,245,.55))',
+        filter:'drop-shadow(0 0 26px rgba(95,216,245,.85))',
+        clipPath:'polygon(0% 20%, 15% 30%, 33% 14%, 43% 30%, 46% 0%, 50% 22%, 54% 0%, 57% 30%, 67% 14%, 85% 30%, 100% 20%, 93% 50%, 70% 58%, 58% 84%, 53% 64%, 50% 100%, 47% 64%, 42% 84%, 30% 58%, 7% 50%)',
+        animation:'glowBreath 3.4s ease-in-out infinite'
+      }}></div>
+    </div>`;
+}
+
+function TopBar({ callsign, subtitle, sector, now, uplink }) {
+  const dateStr = now.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'2-digit' }).toUpperCase();
+  const timeStr = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+  return html`
+    <div style=${{ position:'relative', height:52, padding:'0 20px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'linear-gradient(90deg, rgba(95,216,245,.14), rgba(95,216,245,.03) 40%, rgba(95,216,245,.14))', borderBottom:'1px solid rgba(95,216,245,.35)' }}>
+      <div style=${{ display:'flex', alignItems:'center', gap:16 }}>
+        <div style=${{ width:22, height:22, border:'1px solid #5fd8f5', transform:'rotate(45deg)', position:'relative' }}>
+          <div style=${{ position:'absolute', inset:5, background:'#5fd8f5', boxShadow:'0 0 10px #5fd8f5', animation:'glowBreath 2.4s ease-in-out infinite' }}></div>
+        </div>
+        <span style=${{ fontSize:16, fontWeight:700, letterSpacing:'.36em', textTransform:'uppercase', color:'#eafdff', textShadow:'0 0 16px rgba(95,216,245,.6)' }}>${callsign}</span>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10, letterSpacing:'.24em', color:'#3f7488' }}>${subtitle}</span>
+      </div>
+      <div style=${{ display:'flex', alignItems:'center', gap:22, fontFamily:"'IBM Plex Mono',monospace" }}>
+        <span style=${{ fontSize:10, letterSpacing:'.22em', color:'#3f7488' }}>SECTOR ${sector}</span>
+        <span style=${{ fontSize:10, letterSpacing:'.22em', color:'#4b8b9f' }}>${dateStr}</span>
+        <span style=${{ fontSize:20, fontWeight:600, letterSpacing:'.12em', color:'#9ff2ff', textShadow:'0 0 14px rgba(95,216,245,.6)' }}>${timeStr}</span>
+        <span style=${{ display:'flex', alignItems:'center', gap:7, fontSize:10, letterSpacing:'.2em', color:'#5fd8f5' }}>
+          <span style=${{ width:7, height:7, borderRadius:'50%', background:'#5fd8f5', boxShadow:'0 0 8px #5fd8f5', animation:'blink 1.6s steps(1,end) infinite' }}></span>
+          UPLINK ${uplink}
+        </span>
+      </div>
+    </div>`;
+}
+
+function ModuleRail({ activeModule, onSelect }) {
+  return html`
+    <div style=${{ display:'flex', flexDirection:'column', gap:8, alignItems:'stretch' }}>
+      ${MODULES.map(([code, label]) => {
+        const on = activeModule === code;
+        return html`
+          <button key=${code} onClick=${() => onSelect(code, label)} title=${label} className="hud-hover"
+            style=${{ cursor:'pointer', height:76, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:7,
+              background: on ? 'rgba(95,216,245,.22)' : 'rgba(3,12,18,.7)',
+              border: `1px solid ${on ? 'rgba(95,216,245,.8)' : 'rgba(95,216,245,.2)'}`,
+              color:'#bfe9f8', clipPath:'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))' }}>
+            <span style=${{ width:16, height:16, border:'1px solid #5fd8f5', transform:'rotate(45deg)', opacity: on ? 1 : .45 }}></span>
+            <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.16em', color: on ? '#eafdff' : '#3f7488' }}>${code}</span>
+          </button>`;
+      })}
+      <div style=${{ flex:1, border:'1px solid rgba(95,216,245,.16)', background:'rgba(3,12,18,.7)', display:'flex', alignItems:'flex-end', justifyContent:'center', paddingBottom:10 }}>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.3em', color:'#2e5566', writingMode:'vertical-rl' }}>HOME TERMINAL</span>
+      </div>
+    </div>`;
+}
+
+function CommandLinePanel({ q, onQ, onSubmit, locked }) {
+  return html`
+    <div style=${{ border:'1px solid rgba(95,216,245,.3)', background:'linear-gradient(160deg, rgba(12,42,56,.7), rgba(3,11,17,.92))', padding:13, clipPath:'polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%)' }}>
+      <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.28em', color:'#5fd8f5', marginBottom:11 }}>COMMAND LINE</div>
+      <div style=${{ display:'flex', alignItems:'center', gap:8, border:'1px solid rgba(95,216,245,.45)', background:'rgba(1,8,13,.9)', padding:'9px 10px', boxShadow:'0 0 14px rgba(95,216,245,.12) inset', opacity: locked ? .4 : 1 }}>
+        <span style=${{ color:'#5fd8f5', fontFamily:"'IBM Plex Mono',monospace", fontSize:13 }}>></span>
+        <input value=${q} disabled=${locked} onChange=${e => onQ(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter') onSubmit(q); }} placeholder="type /help"
+          style=${{ flex:1, minWidth:0, background:'transparent', border:0, outline:0, color:'#eafdff', fontFamily:"'IBM Plex Mono',monospace", fontSize:12 }} />
+        <span style=${{ width:7, height:14, background:'#5fd8f5', animation:'blink 1s steps(1,end) infinite' }}></span>
+      </div>
+      <div style=${{ display:'flex', flexWrap:'wrap', gap:5, marginTop:10 }}>
+        ${QUICK_CMDS.map(c => html`
+          <button key=${c} disabled=${locked} onClick=${() => onSubmit(c.toLowerCase())} className="hud-cmd-hover"
+            style=${{ cursor: locked ? 'not-allowed' : 'pointer', opacity: locked ? .4 : 1, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.16em', color:'#9ff2ff', background:'rgba(95,216,245,.1)', border:'1px solid rgba(95,216,245,.34)', padding:'6px 9px' }}>${c}</button>`)}
+      </div>
+    </div>`;
+}
+
+function VitalsPanel({ diag }) {
+  const linkPct = diag ? (diag.online ? 100 : 0) : 0;
+  const storagePct = diag && diag.storageQuotaMb ? Math.min(100, Math.round((diag.storageUsedMb / diag.storageQuotaMb) * 100)) : 0;
+  const rows = [
+    { label:'LINK STATUS', pct: linkPct, tag: diag ? (diag.online ? 'ONLINE' : 'OFFLINE') : '—' },
+    { label:'STORAGE USED', pct: storagePct, tag: diag ? `${diag.storageUsedMb ?? 0} / ${diag.storageQuotaMb ?? 0} MB` : '—' }
+  ];
+  return html`
+    <div style=${{ border:'1px solid rgba(95,216,245,.3)', background:'linear-gradient(160deg, rgba(12,42,56,.7), rgba(3,11,17,.92))', padding:13 }}>
+      <div style=${{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:11 }}>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.28em', color:'#5fd8f5' }}>SYSTEM VITALS</span>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.18em', color:'#3f7488' }}>THIS TERMINAL</span>
+      </div>
+      <div style=${{ display:'flex', flexDirection:'column', gap:11 }}>
+        ${rows.map((v, i) => html`
+          <div key=${i}>
+            <div style=${{ display:'flex', justifyContent:'space-between', fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.16em', color:'#4b8b9f', marginBottom:5 }}>
+              <span>${v.label}</span><span style=${{ color:'#9ff2ff' }}>${v.tag}</span>
+            </div>
+            <div style=${{ height:7, background:'rgba(95,216,245,.12)', position:'relative', overflow:'hidden' }}>
+              <div style=${{ position:'absolute', left:0, top:0, bottom:0, width:v.pct+'%', background:'linear-gradient(90deg, rgba(95,216,245,.4), #9ff2ff)', boxShadow:'0 0 10px rgba(95,216,245,.7)', transition:'width .6s ease' }}></div>
+            </div>
+          </div>`)}
+      </div>
+    </div>`;
+}
+
+function TaskQueuePanel({ tasks, openCount, onToggle, onAdd, onRemove, locked }) {
+  const [draft, setDraft] = useState('');
+  function submit() { if (!draft.trim() || locked) return; onAdd(draft); setDraft(''); }
+  return html`
+    <div style=${{ flex:1, minHeight:0, display:'flex', flexDirection:'column', border:'1px solid rgba(95,216,245,.3)', background:'linear-gradient(180deg, rgba(10,36,48,.68), rgba(2,9,14,.92))', padding:13 }}>
+      <div style=${{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:10 }}>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.28em', color:'#5fd8f5' }}>CASE FILES</span>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, color:'#9ff2ff' }}>${openCount} OPEN</span>
+      </div>
+      <div className="hud-scroll" style=${{ flex:1, minHeight:0, overflow:'auto', display:'flex', flexDirection:'column', gap:6 }}>
+        ${tasks.length === 0 && html`<div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.12em', color:'#3f7488', padding:'8px 2px' }}>NO OPEN CASES</div>`}
+        ${tasks.map(t => html`
+          <div key=${t.id} className="hud-task-hover" style=${{ cursor:'pointer', display:'flex', gap:9, alignItems:'flex-start', border:'1px solid rgba(95,216,245,.16)', background:'rgba(2,10,16,.7)', padding:'8px 9px' }}>
+            <span onClick=${() => !locked && onToggle(t.id)} style=${{ width:11, height:11, marginTop:2, border:'1px solid #5fd8f5', display:'flex', alignItems:'center', justifyContent:'center', flex:'0 0 auto' }}>
+              <span style=${{ width:5, height:5, background:'#5fd8f5', boxShadow:'0 0 6px #5fd8f5', opacity: t.done ? 1 : 0 }}></span>
+            </span>
+            <div onClick=${() => !locked && onToggle(t.id)} style=${{ flex:1, minWidth:0 }}>
+              <div style=${{ fontSize:12, lineHeight:1.35, color:'#dff7ff', opacity: t.done ? .45 : 1, textDecoration: t.done ? 'line-through' : 'none' }}>${t.label}</div>
+            </div>
+            <span onClick=${() => !locked && onRemove(t.id)} title="Remove" style=${{ flex:'0 0 auto', color:'#3f7488', fontFamily:"'IBM Plex Mono',monospace", fontSize:11, padding:'0 2px', cursor:'pointer' }}>×</span>
+          </div>`)}
+      </div>
+      <div style=${{ marginTop:10, display:'flex', gap:6, opacity: locked ? .4 : 1 }}>
+        <input value=${draft} disabled=${locked} onChange=${e => setDraft(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter') submit(); }} placeholder="new case…"
+          style=${{ flex:1, minWidth:0, background:'rgba(1,8,13,.9)', border:'1px solid rgba(95,216,245,.3)', outline:0, color:'#eafdff', fontFamily:"'IBM Plex Mono',monospace", fontSize:11, padding:'7px 8px' }} />
+        <button onClick=${submit} disabled=${locked} className="hud-cmd-hover" style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.16em', color:'#9ff2ff', background:'rgba(95,216,245,.1)', border:'1px solid rgba(95,216,245,.34)', padding:'0 12px' }}>ADD</button>
+      </div>
+    </div>`;
+}
+
+/* ---------- module consoles (main viewport, one per rail item) ---------- */
+function OverviewConsole({ openCount, doneCount, total }) {
+  const clearance = total > 0 ? Math.round((doneCount / total) * 100) : null;
+  const ringOffset = 552.9 * (1 - (clearance ?? 0) / 100);
+  const tiles = [
+    { label:'OPEN CASES', value: openCount },
+    { label:'CLEARED', value: doneCount },
+    { label:'COMM INTERCEPTS', value:'NO FEED' },
+    { label:'NEXT PATROL', value:'NO FEED' }
+  ];
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 46%, rgba(20,66,84,.6), rgba(2,9,14,.95))', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style=${{ position:'absolute', top:12, left:14, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5' }}>OVERVIEW</div>
+      <div style=${{ position:'absolute', top:12, right:14, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.22em', color:'#3f7488' }}>ALL SYSTEMS NOMINAL</div>
+      <div style=${{ position:'absolute', width:520, height:520, border:'1px dashed rgba(95,216,245,.14)', borderRadius:'50%', animation:'spinSlow 44s linear infinite' }}></div>
+      <div style=${{ position:'absolute', width:400, height:400, border:'1px solid rgba(95,216,245,.12)', borderRadius:'50%', animation:'spinRev 30s linear infinite' }}></div>
+      <div style=${{ position:'absolute', width:300, height:300, borderRadius:'50%', border:'1px solid rgba(95,216,245,.4)', animation:'pulseRing 3.6s ease-out infinite' }}></div>
+      <div style=${{ position:'relative', display:'flex', flexDirection:'column', alignItems:'center', gap:14 }}>
+        <div style=${{ position:'relative', width:300, height:300, flex:'0 0 auto', display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <svg viewBox="0 0 200 200" style=${{ position:'absolute', inset:0, width:'100%', height:'100%', transform:'rotate(-90deg)', filter:'drop-shadow(0 0 8px rgba(95,216,245,.6))' }}>
+            <circle cx="100" cy="100" r="88" fill="none" stroke="rgba(95,216,245,.14)" strokeWidth="7"></circle>
+            <circle cx="100" cy="100" r="88" fill="none" stroke="#5fd8f5" strokeWidth="7" strokeDasharray="552.9" strokeDashoffset=${ringOffset} style=${{ transition:'stroke-dashoffset .8s ease' }}></circle>
+            <circle cx="100" cy="100" r="72" fill="none" stroke="rgba(95,216,245,.4)" strokeWidth="1" strokeDasharray="5 9" style=${{ animation:'dashFlow 5s linear infinite' }}></circle>
+          </svg>
+          <${Emblem} />
+        </div>
+        <div style=${{ textAlign:'center' }}>
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.32em', color:'#3f7488' }}>CASE CLEARANCE</div>
+          <div style=${{ fontSize:60, fontWeight:700, lineHeight:1.15, letterSpacing:'-.02em', marginTop:2, color:'#eafdff', textShadow:'0 0 26px rgba(95,216,245,.55)', animation:'flick 7s linear infinite' }}>
+            ${clearance === null ? html`<span style=${{ fontSize:28 }}>—</span>` : html`<span>${clearance}<span style=${{ fontSize:24, color:'#5fd8f5' }}>%</span></span>`}
+          </div>
+        </div>
+      </div>
+      <div style=${{ position:'absolute', bottom:0, left:0, right:0, display:'grid', gridTemplateColumns:'repeat(4,1fr)', borderTop:'1px solid rgba(95,216,245,.24)', background:'rgba(2,9,15,.72)' }}>
+        ${tiles.map(s => html`
+          <div key=${s.label} style=${{ padding:'11px 14px', borderRight:'1px solid rgba(95,216,245,.12)' }}>
+            <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.24em', color:'#3f7488' }}>${s.label}</div>
+            <div style=${{ fontSize:22, fontWeight:600, color:'#dff7ff' }}>${s.value}</div>
+          </div>`)}
+      </div>
+    </div>`;
+}
+
+function CaseFilesConsole({ tasks, openCount, doneCount }) {
+  const open = tasks.filter(t => !t.done);
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 20%, rgba(20,66,84,.35), rgba(2,9,14,.95))', padding:16, display:'flex', flexDirection:'column' }}>
+      <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5', marginBottom:14 }}>CASE FILES · FULL LOG</div>
+      <div style=${{ display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:10, marginBottom:14 }}>
+        <div style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'11px 12px' }}>
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488' }}>OPEN</div>
+          <div style=${{ fontSize:22, fontWeight:700, color:'#dff7ff' }}>${openCount}</div>
+        </div>
+        <div style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'11px 12px' }}>
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488' }}>CLEARED</div>
+          <div style=${{ fontSize:22, fontWeight:700, color:'#dff7ff' }}>${doneCount}</div>
+        </div>
+      </div>
+      <div className="hud-scroll" style=${{ flex:1, minHeight:0, overflow:'auto', display:'flex', flexDirection:'column', gap:6 }}>
+        ${open.length === 0 && html`<div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10, color:'#3f7488' }}>NO OPEN CASES</div>`}
+        ${open.map(t => html`
+          <div key=${t.id} style=${{ border:'1px solid rgba(95,216,245,.16)', background:'rgba(2,10,16,.7)', padding:'8px 10px', fontSize:12, color:'#dff7ff' }}>${t.label}</div>`)}
+      </div>
+      <div style=${{ marginTop:12, fontFamily:"'IBM Plex Mono',monospace", fontSize:10, letterSpacing:'.14em', color:'#3f7488' }}>Manage cases live in the queue at left.</div>
+    </div>`;
+}
+
+function NoFeedConsole({ label, note }) {
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 46%, rgba(20,66,84,.35), rgba(2,9,14,.95))', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style=${{ position:'absolute', top:12, left:14, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5' }}>${label}</div>
+      <div style=${{ textAlign:'center', padding:'0 40px' }}>
+        <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:12, letterSpacing:'.4em', color:'#3f7488' }}>NO FEED</div>
+        <div style=${{ marginTop:12, fontSize:13, color:'#7fb8cc', maxWidth:360, lineHeight:1.5 }}>${note}</div>
+      </div>
+    </div>`;
+}
+
+function DiagnosticsConsole({ diag }) {
+  const tiles = [
+    { label:'LINK STATUS', value: diag ? (diag.online ? 'ONLINE' : 'OFFLINE') : '—' },
+    { label:'CONNECTION', value: diag && diag.effectiveType ? diag.effectiveType.toUpperCase() : 'N/A' },
+    { label:'DOWNLINK', value: diag && diag.downlink != null ? diag.downlink + ' MBPS' : 'N/A' },
+    { label:'ROUND TRIP', value: diag && diag.rtt != null ? diag.rtt + ' MS' : 'N/A' },
+    { label:'CPU THREADS', value: diag && diag.cores ? diag.cores : 'N/A' },
+    { label:'MEMORY', value: diag && diag.memoryGb != null ? diag.memoryGb + ' GB' : 'N/A' },
+    { label:'STORAGE USED', value: diag ? `${diag.storageUsedMb ?? 0} / ${diag.storageQuotaMb ?? 0} MB` : '—' },
+    { label:'TIMEZONE', value: diag ? diag.tz : '—' }
+  ];
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 20%, rgba(20,66,84,.35), rgba(2,9,14,.95))', padding:16, display:'flex', flexDirection:'column' }}>
+      <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5', marginBottom:14 }}>SYSTEM DIAGNOSTICS · THIS TERMINAL</div>
+      <div style=${{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+        ${tiles.map(t => html`
+          <div key=${t.label} style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'11px 12px' }}>
+            <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488' }}>${t.label}</div>
+            <div style=${{ fontSize:16, fontWeight:600, color:'#dff7ff', marginTop:4 }}>${t.value}</div>
+          </div>`)}
+      </div>
+      <div style=${{ marginTop:'auto', paddingTop:14, fontFamily:"'IBM Plex Mono',monospace", fontSize:10, letterSpacing:'.14em', color:'#3f7488' }}>
+        BACKUPS / SYNC STATUS · NO FEED — connect a backup or sync monitor.
+      </div>
+    </div>`;
+}
+
+function CityWatchConsole({ city, weather }) {
+  const cells = [
+    { label:'HUMIDITY', value: weather ? weather.humidity : '—' },
+    { label:'WIND', value: weather ? weather.wind : '—' },
+    { label:'PRESSURE', value: weather ? weather.pressure + ' HPA' : '—' }
+  ];
+  return html`
+    <div style=${{ flex:1, position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.3)', background:'radial-gradient(75% 75% at 50% 30%, rgba(20,66,84,.35), rgba(2,9,14,.95))', padding:20, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:18 }}>
+      <div style=${{ position:'absolute', top:12, left:14, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.3em', color:'#5fd8f5' }}>CITY WATCH · ${city}</div>
+      <div style=${{ fontSize:88, fontWeight:700, color:'#eafdff', textShadow:'0 0 30px rgba(95,216,245,.55)' }}>${weather ? weather.temp + '°' : '—'}</div>
+      <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:12, letterSpacing:'.24em', color:'#9ff2ff' }}>${weather ? weather.desc : 'AWAITING UPLINK…'}</div>
+      <div style=${{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, width:'100%', maxWidth:420 }}>
+        ${cells.map(c => html`
+          <div key=${c.label} style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'10px 12px', textAlign:'center' }}>
+            <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488' }}>${c.label}</div>
+            <div style=${{ fontSize:15, fontWeight:600, color:'#dff7ff', marginTop:4 }}>${c.value}</div>
+          </div>`)}
+      </div>
+      <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:10, letterSpacing:'.14em', color:'#3f7488' }}>LOCAL NEWS & ALERTS · NO FEED — connect a news source.</div>
+    </div>`;
+}
+
+function WeatherPanel({ city, weather }) {
+  const temp = weather ? weather.temp : '—';
+  const desc = weather ? weather.desc : 'AWAITING UPLINK…';
+  const cells = [
+    { label:'HUMID', value: weather ? weather.humidity : '—' },
+    { label:'WIND', value: weather ? weather.wind : '—' },
+    { label:'PRESS', value: weather ? weather.pressure : '—' }
+  ];
+  return [
+    html`
+      <div key="card" style=${{ border:'1px solid rgba(95,216,245,.3)', background:'linear-gradient(160deg, rgba(12,42,56,.7), rgba(3,11,17,.92))', padding:13, display:'flex', alignItems:'center', justifyContent:'space-between', clipPath:'polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%)' }}>
+        <div>
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.26em', color:'#5fd8f5' }}>${city}</div>
+          <div style=${{ fontSize:38, fontWeight:700, lineHeight:1.05, color:'#eafdff', textShadow:'0 0 18px rgba(95,216,245,.5)' }}>${temp}°</div>
+          <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.16em', color:'#4b8b9f', marginTop:3 }}>${desc}</div>
+        </div>
+        <div style=${{ position:'relative', width:60, height:60 }}>
+          <div style=${{ position:'absolute', inset:0, border:'1px solid rgba(95,216,245,.45)', borderRadius:'50%', animation:'spinSlow 22s linear infinite' }}></div>
+          <div style=${{ position:'absolute', inset:9, border:'1px dashed rgba(95,216,245,.35)', borderRadius:'50%', animation:'spinRev 15s linear infinite' }}></div>
+          <div style=${{ position:'absolute', inset:20, borderRadius:'50%', background:'#5fd8f5', boxShadow:'0 0 20px #5fd8f5', animation:'glowBreath 3s ease-in-out infinite' }}></div>
+        </div>
+      </div>`,
+    html`
+      <div key="cells" style=${{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
+        ${cells.map(w => html`
+          <div key=${w.label} style=${{ border:'1px solid rgba(95,216,245,.18)', background:'rgba(3,12,18,.7)', padding:'9px 10px' }}>
+            <div style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:8, letterSpacing:'.2em', color:'#3f7488' }}>${w.label}</div>
+            <div style=${{ fontSize:15, fontWeight:600, color:'#dff7ff' }}>${w.value}</div>
+          </div>`)}
+      </div>`
+  ];
+}
+
+function CommsLog({ logs, onLockdown, lockLabel }) {
+  return html`
+    <div style=${{ flex:1, minHeight:0, display:'flex', flexDirection:'column', border:'1px solid rgba(95,216,245,.3)', background:'linear-gradient(180deg, rgba(10,36,48,.68), rgba(2,9,14,.94))', padding:13 }}>
+      <div style=${{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+        <span style=${{ fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.28em', color:'#5fd8f5' }}>ACTIVITY LOG</span>
+        <span style=${{ display:'flex', alignItems:'center', gap:6, fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.2em', color:'#9ff2ff' }}>
+          <span style=${{ width:6, height:6, borderRadius:'50%', background:'#5fd8f5', boxShadow:'0 0 8px #5fd8f5', animation:'blink 1.2s steps(1,end) infinite' }}></span>LIVE
+        </span>
+      </div>
+      <div className="hud-scroll" style=${{ flex:1, minHeight:0, overflow:'auto', display:'flex', flexDirection:'column', gap:8, fontFamily:"'IBM Plex Mono',monospace" }}>
+        ${logs.length === 0 && html`<div style=${{ fontSize:10, color:'#3f7488' }}>NO ACTIVITY YET</div>`}
+        ${logs.map(l => html`
+          <div key=${l.id} style=${{ display:'flex', gap:9, borderLeft:'2px solid rgba(95,216,245,.4)', paddingLeft:9, animation:'riseFade .35s ease-out' }}>
+            <span style=${{ fontSize:9, color:'#3f7488', flex:'0 0 auto' }}>${l.t}</span>
+            <span style=${{ fontSize:10, lineHeight:1.5, color:'#bfe9f8' }}>${l.msg}</span>
+          </div>`)}
+      </div>
+      <div style=${{ marginTop:11 }}>
+        <button onClick=${onLockdown} className="hud-lock-hover" style=${{ width:'100%', cursor:'pointer', fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.16em', color:'#01040a', background:'#5fd8f5', border:'1px solid #d6fbff', padding:8, boxShadow:'0 0 18px rgba(95,216,245,.5)' }}>${lockLabel}</button>
+      </div>
+    </div>`;
+}
+
+function Ticker({ text }) {
+  return html`
+    <div style=${{ position:'absolute', bottom:0, left:0, right:0, height:26, display:'flex', alignItems:'center', overflow:'hidden', borderTop:'1px solid rgba(95,216,245,.3)', background:'linear-gradient(90deg, rgba(95,216,245,.12), rgba(2,9,14,.9) 40%, rgba(95,216,245,.12))' }}>
+      <div style=${{ display:'flex', gap:56, whiteSpace:'nowrap', animation:'marquee 36s linear infinite', fontFamily:"'IBM Plex Mono',monospace", fontSize:9, letterSpacing:'.24em', color:'#4b8b9f' }}>
+        <span>${text}</span><span>${text}</span>
+      </div>
+    </div>`;
+}
+
+/* ---------- app ---------- */
+function App() {
+  const now = useClock();
+  const { tasks, addTask, toggleTask, removeTask, openCount, doneCount, total } = useTasks();
+  const { logs, push, clear } = useActivity();
+  const weather = useWeather(WEATHER_LAT, WEATHER_LON);
+  const diag = useDiagnostics();
+
+  const [q, setQ] = useState('');
+  const [module, setModule] = useState('OPS');
+  const [locked, setLocked] = useState(false);
+
+  const toggleLock = useCallback(() => {
+    setLocked(l => { push(!l ? 'LOCKDOWN · engaged — workstation sealed' : 'LOCKDOWN · released — workstation restored'); return !l; });
+  }, [push]);
+
+  const runBriefing = useCallback(() => {
+    push('STATUS · all systems nominal');
+    const openTasks = tasks.filter(t => !t.done);
+    push(`CASE FILES · ${openCount} open${openTasks[0] ? ' · top: "' + openTasks[0].label + '"' : ''}`);
+    push('PATROL LOG · NO FEED — connect calendar');
+    push('COMM INTERCEPTS · NO FEED — connect email');
+    push(`CITY WATCH · ${weather ? weather.temp + '°C ' + weather.desc : 'awaiting uplink…'}`);
+  }, [push, tasks, openCount, weather]);
+
+  const briefedRef = useRef(false);
+  useEffect(() => {
+    if (briefedRef.current) return;
+    briefedRef.current = true;
+    push(`BATCOMPUTER ONLINE · ${greeting(new Date())}, ${OPERATOR_ADDRESS}.`);
+    runBriefing();
+  }, []);
+
+  const handleCmd = useCallback((raw) => {
+    const c = raw.trim().toLowerCase();
+    setQ('');
+    if (!c) return;
+    if (c === '/help') push('HELP · /brief /status /lockdown /clear');
+    else if (c === '/brief') runBriefing();
+    else if (c === '/status') push(`STATUS · ${openCount} open cases · comms NO FEED · patrol NO FEED · ${weather ? weather.temp + '°C ' + weather.desc : 'weather awaiting uplink'}`);
+    else if (c === '/lockdown') toggleLock();
+    else if (c === '/clear') clear();
+    else push(`UNRECOGNIZED COMMAND · "${raw.trim()}" — try /help`);
+  }, [push, clear, toggleLock, runBriefing, openCount, weather]);
+
+  const selectModule = useCallback((code, label) => { setModule(code); push('MODULE · ' + label + ' loaded'); }, [push]);
+
+  const ticker = `${openCount} OPEN CASES · COMM INTERCEPTS NO FEED · PATROL LOG NO FEED · UPLINK ${locked ? 'SEALED' : 'NOMINAL'} · ${WEATHER_CITY} ${weather ? weather.temp + '°C' : '—'}   `;
+
+  return html`
+    <div style=${{ minHeight:'100vh', padding:28, boxSizing:'border-box', background:'radial-gradient(120% 80% at 50% 0%, #072230 0%, #030c14 55%, #01040a 100%)', overflow:'auto' }}>
+      <div style=${{ width:1440, height:900, margin:'0 auto', position:'relative', overflow:'hidden', border:'1px solid rgba(95,216,245,.28)', background:'linear-gradient(180deg, rgba(6,26,38,.9), rgba(2,7,12,.96))', boxShadow:'0 0 60px rgba(95,216,245,.09) inset, 0 40px 110px rgba(0,0,0,.9)' }}>
+        <div style=${{ position:'absolute', inset:0, backgroundImage:'linear-gradient(rgba(95,216,245,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(95,216,245,.05) 1px, transparent 1px)', backgroundSize:'40px 40px', pointerEvents:'none' }}></div>
+        <div style=${{ position:'absolute', inset:0, backgroundImage:'linear-gradient(rgba(95,216,245,.045) 1px, transparent 1px)', backgroundSize:'100% 3px', pointerEvents:'none' }}></div>
+        <div style=${{ position:'absolute', left:0, right:0, height:110, background:'linear-gradient(rgba(95,216,245,0), rgba(95,216,245,.06), rgba(95,216,245,0))', animation:'sweep 8s linear infinite', pointerEvents:'none' }}></div>
+
+        ${locked && html`
+          <div style=${{ position:'absolute', inset:0, zIndex:5, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(1,4,8,.6)', pointerEvents:'none' }}>
+            <div style=${{ border:'1px solid rgba(255,207,95,.6)', color:'#ffcf5f', fontFamily:"'IBM Plex Mono',monospace", fontSize:12, letterSpacing:'.4em', padding:'14px 26px', background:'rgba(2,9,14,.9)', boxShadow:'0 0 24px rgba(255,207,95,.25)' }}>WORKSTATION SEALED</div>
+          </div>`}
+
+        <${TopBar} callsign=${CALLSIGN} subtitle=${SUBTITLE} sector=${SECTOR} now=${now} uplink=${locked ? 'SEALED' : 'OK'} />
+
+        <div style=${{ position:'relative', display:'grid', gridTemplateColumns:'76px 268px 1fr 300px', gap:14, padding:14, height:848, boxSizing:'border-box' }}>
+          <${ModuleRail} activeModule=${module} onSelect=${selectModule} />
+
+          <div style=${{ display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
+            <${CommandLinePanel} q=${q} onQ=${setQ} onSubmit=${handleCmd} locked=${locked} />
+            <${VitalsPanel} diag=${diag} />
+            <${TaskQueuePanel} tasks=${tasks} openCount=${openCount} onToggle=${toggleTask} onAdd=${addTask} onRemove=${removeTask} locked=${locked} />
+          </div>
+
+          <div style=${{ display:'flex', flexDirection:'column', minHeight:0 }}>
+            ${module === 'OPS' && html`<${OverviewConsole} openCount=${openCount} doneCount=${doneCount} total=${total} />`}
+            ${module === 'CSF' && html`<${CaseFilesConsole} tasks=${tasks} openCount=${openCount} doneCount=${doneCount} />`}
+            ${module === 'CMS' && html`<${NoFeedConsole} label="COMM INTERCEPTS" note="Connect an email or Slack MCP connector to activate this feed." />`}
+            ${module === 'PTL' && html`<${NoFeedConsole} label="PATROL LOG" note="Connect Google Calendar or iCal to activate this feed." />`}
+            ${module === 'SYS' && html`<${DiagnosticsConsole} diag=${diag} />`}
+            ${module === 'CTY' && html`<${CityWatchConsole} city=${WEATHER_CITY} weather=${weather} />`}
+          </div>
+
+          <div style=${{ display:'flex', flexDirection:'column', gap:14, minHeight:0 }}>
+            <${WeatherPanel} city=${WEATHER_CITY} weather=${weather} />
+            <${CommsLog} logs=${logs} onLockdown=${toggleLock} lockLabel=${locked ? 'RELEASE' : 'LOCKDOWN'} />
+          </div>
+        </div>
+
+        <${Ticker} text=${ticker} />
+      </div>
+    </div>`;
+}
+
+createRoot(document.getElementById('root')).render(h(StrictMode, null, h(App)));
+</script>
+</body>
+</html>
