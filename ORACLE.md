@@ -33,4 +33,6 @@ Replies are spoken aloud via text-to-speech, so:
 
 ## Status
 
-First pass: text-in (voice-to-text via the browser) → Claude (with live web search) → text-out (spoken via TTS). No memory between sessions yet — each conversation starts fresh when the Oracle panel loads. No access to the Batcomputer's other live feeds (Gmail, Calendar, attendance) yet — that's a natural next step once the core loop is proven, matching the phased pattern used for the rest of the Batcomputer's live data.
+First pass: text-in (voice-to-text via the browser) → an LLM (with live web search) → text-out (spoken via TTS). No memory between sessions yet — each conversation starts fresh when the Oracle panel loads. No access to the Batcomputer's other live feeds (Gmail, Calendar, attendance) yet — that's a natural next step once the core loop is proven, matching the phased pattern used for the rest of the Batcomputer's live data.
+
+**Brain:** runs on Groq (`groq/compound-mini`), chosen deliberately over Anthropic's Claude API — Claude has no free tier and requires billing, and the user wants Oracle running on a genuinely free, no-credit-card provider. Groq's Compound models have built-in web search (Tavily-powered) baked in server-side, so the web-search goal above still holds without a separate search API signup. Quality is a step down from Claude, and this is a deliberate cost/quality tradeoff, not an oversight — revisit if the user ever wants to add billing for a better model.
