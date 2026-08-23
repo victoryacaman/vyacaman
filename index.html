@@ -653,7 +653,10 @@ function OracleConsole({ speak }) {
   }, [speak]);
 
   const sendMessage = useCallback(async (text) => {
-    const history = turnsRef.current.map(t => ({ role: t.role === 'user' ? 'user' : 'assistant', content: t.text }));
+    const MAX_HISTORY_TURNS = 16;
+    const history = turnsRef.current
+      .slice(-MAX_HISTORY_TURNS)
+      .map(t => ({ role: t.role === 'user' ? 'user' : 'assistant', content: t.text }));
     setTurns(t => [...t, { role: 'user', text }]);
     setStatus('thinking');
     setErrorMsg('');
@@ -661,7 +664,7 @@ function OracleConsole({ speak }) {
       const res = await fetch(ORACLE_CHAT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, history }) });
       const data = await res.json();
       if (!data.ok) {
-        setErrorMsg(data.error === 'not_configured' ? 'Oracle needs an Anthropic API key configured before it can think.' : `Oracle hit an error: ${data.error}`);
+        setErrorMsg(data.error === 'not_configured' ? 'Oracle needs a Groq API key configured before it can think.' : `Oracle hit an error: ${data.error}`);
         setStatus('idle');
         return;
       }
