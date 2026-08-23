@@ -623,25 +623,32 @@ function OracleConsole({ speak }) {
 
   const playReply = useCallback(async (text) => {
     setStatus('speaking');
+    let played = false;
     try {
       const res = await fetch(ORACLE_SPEAK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
       const ctype = res.headers.get('content-type') || '';
       if (res.ok && ctype.startsWith('audio/')) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        await new Promise((resolve) => {
-          const audio = new Audio(url);
-          audio.onended = resolve;
-          audio.onerror = resolve;
-          audio.play().catch(resolve);
-        });
+        try {
+          await new Promise((resolve, reject) => {
+            const audio = new Audio(url);
+            audio.onended = resolve;
+            audio.onerror = reject;
+            audio.play().then(resolve).catch(reject);
+          });
+          played = true;
+        } catch (playErr) {
+          console.warn('Oracle: premium voice failed to play, falling back.', playErr);
+        }
         URL.revokeObjectURL(url);
       } else {
-        speak(text);
+        console.warn('Oracle: oracle-speak unavailable', res.status, await res.text().catch(() => ''));
       }
     } catch (e) {
-      speak(text);
+      console.warn('Oracle: could not reach oracle-speak', e);
     }
+    if (!played) speak(text);
     setStatus('idle');
   }, [speak]);
 
